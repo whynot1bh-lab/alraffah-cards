@@ -7,6 +7,8 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 
 const FONTS =
   "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Instrument+Sans:wght@400;500;600&display=swap";
+const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const API_TIMEOUT_MS = 20000;
 
 const CSS = `
 :root{
@@ -330,18 +332,14 @@ Write broadcast-ready analysis ${ar ? "in simple Modern Standard Arabic with a n
 - Invent nothing that is not in the data above.
 - 140 to 190 words total.`;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      messages: [{ role: "user", content: prompt }],
-    }),
+  const res = await postAnthropic({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1000,
+    messages: [{ role: "user", content: prompt }],
   });
   if (!res.ok) throw new Error("api");
   const d = await res.json();
-  return d.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+  return (d.content || []).map((b) => (b.type === "text" ? b.text : "")).join("").trim();
 }
 
 /* ---------- research agent ---------- */
@@ -414,19 +412,15 @@ Reply with JSON only. No prose, no markdown fences.
   "sources": ["site names you actually used"]
 }`;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      messages: [{ role: "user", content: prompt }],
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-    }),
+  const res = await postAnthropic({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1000,
+    messages: [{ role: "user", content: prompt }],
+    tools: [{ type: "web_search_20250305", name: "web_search" }],
   });
   if (!res.ok) throw new Error("api");
   const d = await res.json();
-  const text = d.content
+  const text = (d.content || [])
     .filter((b) => b.type === "text")
     .map((b) => b.text)
     .join("\n");
@@ -443,19 +437,15 @@ If you cannot find this jockey's figures, say so rather than guessing.
 Reply with JSON only, no prose, no markdown fences:
 { "found": true or false, "winPct": "number as text, or empty", "note": "one short sentence with wins and rides if shown" }`;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      messages: [{ role: "user", content: prompt }],
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-    }),
+  const res = await postAnthropic({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1000,
+    messages: [{ role: "user", content: prompt }],
+    tools: [{ type: "web_search_20250305", name: "web_search" }],
   });
   if (!res.ok) throw new Error("api");
   const d = await res.json();
-  return grabJSON(d.content.filter((b) => b.type === "text").map((b) => b.text).join("\n"));
+  return grabJSON((d.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n"));
 }
 
 async function translateNames(items) {
@@ -471,18 +461,14 @@ Rules:
 Reply with JSON only, no markdown fences:
 { "names": [ { "name": "the English name exactly as given", "ar": "the Arabic form" } ] }`;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      messages: [{ role: "user", content: prompt }],
-    }),
+  const res = await postAnthropic({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1000,
+    messages: [{ role: "user", content: prompt }],
   });
   if (!res.ok) throw new Error("api");
   const d = await res.json();
-  return grabJSON(d.content.filter((b) => b.type === "text").map((b) => b.text).join("\n"));
+  return grabJSON((d.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n"));
 }
 
 async function storyAngles(race, rows, names) {
@@ -510,19 +496,33 @@ Give the production team something to build the segment around. Reply with JSON 
 
 Give three angles. Set solid to false for any angle you could not actually verify by searching — the team must know which ones to check before airing. Never invent a statistic.`;
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      messages: [{ role: "user", content: prompt }],
-      tools: [{ type: "web_search_20250305", name: "web_search" }],
-    }),
+  const res = await postAnthropic({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1000,
+    messages: [{ role: "user", content: prompt }],
+    tools: [{ type: "web_search_20250305", name: "web_search" }],
   });
   if (!res.ok) throw new Error("api");
   const d = await res.json();
-  return grabJSON(d.content.filter((b) => b.type === "text").map((b) => b.text).join("\n"));
+  return grabJSON((d.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n"));
+}
+
+async function postAnthropic(payload) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    return await fetch(ANTHROPIC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e && e.name === "AbortError") throw new Error("The request timed out. Try again.");
+    throw e;
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 function daysSince(iso) {
@@ -638,6 +638,7 @@ export default function Racecard() {
   const [status, setStatus] = useState(null);
   const [accepted, setAccepted] = useState({});
   const endRef = useRef(null);
+  const scrollTimerRef = useRef(null);
 
   useEffect(() => {
     if (!document.getElementById("rc-fonts")) {
@@ -648,9 +649,12 @@ export default function Racecard() {
     loadStable().then((s) => { setStable(s); setLoaded(true); });
     loadKey(NAMES_KEY, {}).then(setNames);
     loadKey(LOG_KEY, []).then(setLog);
+    return () => {
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    };
   }, []);
 
-  const setRaceField = (k) => (e) => setRace({ ...race, [k]: e.target.value });
+  const setRaceField = (k) => (e) => setRace((prev) => ({ ...prev, [k]: e.target.value }));
   const patch = (key, k, v) =>
     setEntries((es) => es.map((x) => (x.key === key ? { ...x, [k]: v } : x)));
 
@@ -856,7 +860,10 @@ export default function Racecard() {
     setFinishes({});
     setStory(null);
     autoNames(list);
-    setTimeout(() => endRef.current && endRef.current.scrollIntoView({ behavior: "smooth" }), 90);
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    scrollTimerRef.current = setTimeout(() => {
+      if (endRef.current) endRef.current.scrollIntoView({ behavior: "smooth" });
+    }, 90);
 
     const before = stable.length;
     const after = await syncStable(list);
@@ -871,24 +878,25 @@ export default function Racecard() {
   async function saveFinishes() {
     const next = [...stable];
     let count = 0;
-    Object.entries(finishes).forEach(([name, pos]) => {
-      const p = String(pos).replace(/\D/g, "");
+    rows.forEach((r) => {
+    const p = String(finishes[r.key] || "").replace(/\D/g, "");
       if (!p) return;
-      const i = next.findIndex((h) => h.name.toLowerCase() === name.toLowerCase());
-      if (i < 0) return;
-      const prev = (next[i].form || "").split("-").filter(Boolean);
-      next[i] = { ...next[i], form: [p, ...prev].slice(0, 5).join("-") };
-      count++;
+    const i = next.findIndex(
+      (h) => (r.horseId && h.id === r.horseId) || h.name.toLowerCase() === r.name.toLowerCase()
+    );
+    if (i < 0) return;
+    const prev = (next[i].form || "").split("-").filter(Boolean);
+    next[i] = { ...next[i], form: [p, ...prev].slice(0, 5).join("-") };
+    count++;
     });
     setStable(next);
     await saveStable(next);
 
-    const winnerName = Object.entries(finishes)
-      .find(([, p]) => String(p).replace(/\D/g, "") === "1");
-    if (winnerName && rows) {
-      const winner = winnerName[0];
+    const winnerRow = rows.find((r) => String(finishes[r.key] || "").replace(/\D/g, "") === "1");
+    if (winnerRow && rows) {
+      const winner = winnerRow.name;
       const predictedIdx = rows.findIndex(
-        (r) => r.name.toLowerCase() === winner.toLowerCase()
+        (r) => r.key === winnerRow.key
       );
       const entry = {
         id: uid(),
@@ -936,10 +944,10 @@ export default function Racecard() {
           <F label="Class"><input className="in" value={race.klass} onChange={setRaceField("klass")} placeholder="Class 1" /></F>
         </div>
         <F label="Surface">
-          <Chips options={SURFACES} value={race.surface} onChange={(v) => setRace({ ...race, surface: v })} />
+          <Chips options={SURFACES} value={race.surface} onChange={(v) => setRace((prev) => ({ ...prev, surface: v }))} />
         </F>
         <F label="Category">
-          <Chips options={CATEGORIES} value={race.category} onChange={(v) => setRace({ ...race, category: v })} />
+          <Chips options={CATEGORIES} value={race.category} onChange={(v) => setRace((prev) => ({ ...prev, category: v }))} />
         </F>
       </div>
 
@@ -1467,7 +1475,7 @@ export default function Racecard() {
                   .filter(([, v]) => v && String(v).trim())
                   .map(([k, v]) => (
                     <div className="rw" key={k}
-                      onClick={() => setAccepted({ ...accepted, [k]: !accepted[k] })}>
+                      onClick={() => setAccepted((prev) => ({ ...prev, [k]: !prev[k] }))}>
                       <div className="av">{accepted[k] ? "✓" : ""}</div>
                       <div className="rw-main">
                         <div className="rw-t">{String(v)}</div>
@@ -1507,8 +1515,8 @@ export default function Racecard() {
               <div className="row2" key={r.key} style={{ alignItems: "center" }}>
                 <div style={{ fontSize: 15, fontWeight: 500 }}>{r.name}</div>
                 <input className="in" inputMode="numeric" placeholder="finished"
-                  value={finishes[r.name] || ""}
-                  onChange={(e) => setFinishes({ ...finishes, [r.name]: e.target.value })} />
+                  value={finishes[r.key] || ""}
+                  onChange={(e) => setFinishes((prev) => ({ ...prev, [r.key]: e.target.value }))} />
               </div>
             ))}
           </div>
